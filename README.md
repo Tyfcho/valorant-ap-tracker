@@ -1,0 +1,1 @@
+Set your current account level combined with the amount of AP you have in that level, then put in your target (what you want to achieve), then, after every game, manually add a snapshot of your gained AP, after about 20-25 entries, the tracker will tell you an estimate on how many you have to play with said gained AP spread over the amount of entries you did.
