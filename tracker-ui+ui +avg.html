@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Valorant AP Tracker</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      color: #fff;
+      background-size: cover;
+    }
+
+    .overlay {
+      backdrop-filter: blur(8px);
+      background: rgba(0, 0, 0, 0.6);
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    h1 {
+      text-align: center;
+    }
+
+    .input-group, .level-config {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    input[type="number"] {
+      padding: 8px;
+      width: 140px;
+    }
+
+    button {
+      padding: 8px 16px;
+      cursor: pointer;
+      background-color: #A32CC4;
+      border: none;
+      color: white;
+      font-weight: bold;
+    }
+
+    .progress-bar-container {
+      width: 80%;
+      height: 30px;
+      background-color: #444;
+      margin: 20px auto;
+      border-radius: 15px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background-color: #af69ef;
+      text-align: center;
+      line-height: 30px;
+      font-weight: bold;
+      transition: width 0.3s ease-in-out;
+    }
+
+    .history-section {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .history, .games-remaining {
+      flex: 1;
+      min-width: 300px;
+      background-color: rgba(255, 255, 255, 0.05);
+      padding: 15px;
+      border-radius: 10px;
+    }
+
+    .snapshot {
+      margin-bottom: 10px;
+      padding: 5px;
+      border-bottom: 1px solid #777;
+    }
+  </style>
+</head>
+<body>
+<div class="overlay">
+  <h1>Valorant AP Tracker</h1>
+
+  <div class="level-config">
+    <input type="number" id="currentLevel" placeholder="Your Level">
+    <input type="number" id="currentProgress" placeholder="AP in that level">
+    <input type="number" id="targetLevel" placeholder="Target Level (e.g. 20)">
+    <button onclick="setInitialAP()">Set Progress</button>
+  </div>
+
+  <div class="input-group">
+    <input type="number" id="apInput" placeholder="Enter new AP gain">
+    <button onclick="addSnapshot()">Add Snapshot</button>
+    <button onclick="toggleHistory()">Toggle History View</button>
+    <button onclick="resetProgress()">Reset</button>
+  </div>
+
+  <div class="progress-bar-container">
+    <div id="progressBar" class="progress-bar">0%</div>
+  </div>
+
+  <div class="history-section">
+    <div class="history" id="history"></div>
+    <div class="games-remaining" id="gamesRemaining"></div>
+    <div class="games-remaining" id="avgGamesRemaining"></div>
+  </div>
+</div>
+
+<script>
+  let history = JSON.parse(localStorage.getItem('apHistory')) || [];
+  let baseAP = parseInt(localStorage.getItem('baseAP')) || 0;
+  let targetLevel = parseInt(localStorage.getItem('targetLevel')) || 20;
+  let showAll = false;
+
+  function getTargetAP() {
+    return targetLevel * 5000;
+  }
+
+  function getTotalAP() {
+    return baseAP + history.reduce((sum, entry) => sum + entry.gain, 0);
+  }
+
+  function updateProgress() {
+    const total = getTotalAP();
+    const targetAP = getTargetAP();
+    const percent = Math.min(100, ((total / targetAP) * 100).toFixed(2));
+    const bar = document.getElementById("progressBar");
+    const level = Math.floor(total / 5000);
+    const apInLevel = total - (level * 5000)
+    bar.style.width = percent + "%";
+    bar.textContent = `${percent}% (${total} AP / ${targetAP} AP | Level ${level} + ${apInLevel} AP)`;
+  }
+
+  function updateHistory() {
+    const historyDiv = document.getElementById("history");
+    historyDiv.innerHTML = `<h3>Snapshots</h3>`;
+    const start = showAll ? 0 : Math.max(0, history.length - 10);
+
+    let runningTotal = baseAP;
+    for (let i = 0; i < history.length; i++) {
+      runningTotal += history[i].gain;
+      if (i >= start) {
+        historyDiv.innerHTML += `<div class="snapshot">Snapshot ${i + 1}: +${history[i].gain} AP (Total: ${runningTotal})</div>`;
+      }
+    }
+  }
+
+  function updateGamesRemaining() {
+    const gamesDiv = document.getElementById("gamesRemaining");
+    gamesDiv.innerHTML = `<h3>Games Remaining (Worst Case)</h3>`;
+
+    if (history.length < 1) {
+      gamesDiv.innerHTML += "Add at least one snapshot.";
+      return;
+    }
+
+    const gains = history.map(h => h.gain).filter(g => g > 0);
+    if (gains.length === 0) {
+      gamesDiv.innerHTML += "No valid gains recorded yet.";
+      return;
+    }
+
+    const minGain = Math.min(...gains);
+    const remaining = getTargetAP() - getTotalAP();
+    const worstCaseGames = Math.ceil(remaining / minGain);
+
+    const apPerMode = {
+      "Swiftplay": 250,
+      "Spike Rush": 220,
+      "Unrated": 420,
+      "TDM": 300
+    };
+
+    gamesDiv.innerHTML += `<div>Total AP Remaining: ${remaining}</div>`;
+    gamesDiv.innerHTML += `<div>Worst Case AP/Game: ${minGain}</div>`;
+    gamesDiv.innerHTML += `<div><strong>Estimated Games:</strong></div>`;
+
+    for (const mode in apPerMode) {
+      const est = Math.ceil(remaining / apPerMode[mode]);
+      gamesDiv.innerHTML += `<div>${mode}: ${est} games</div>`;
+    }
+  }
+
+  function addSnapshot() {
+    const input = document.getElementById("apInput");
+    const gain = parseInt(input.value);
+    if (isNaN(gain) || gain <= 0) return alert("Enter a valid positive number.");
+
+    history.push({ gain });
+    localStorage.setItem('apHistory', JSON.stringify(history));
+    input.value = '';
+    updateProgress();
+    updateHistory();
+    updateGamesRemaining();
+    updateAverageGamesRemaining();
+  }
+
+  function toggleHistory() {
+    showAll = !showAll;
+    updateHistory();
+  }
+
+  function resetProgress() {
+    if (confirm("Are you sure you want to reset all data?")) {
+      history = [];
+      baseAP = 0;
+      localStorage.removeItem('apHistory');
+      localStorage.removeItem('baseAP');
+      localStorage.removeItem('targetLevel');
+      updateProgress();
+      updateHistory();
+      updateGamesRemaining();
+      updateAverageGamesRemaining();
+    }
+  }
+
+  function setInitialAP() {
+    const level = parseInt(document.getElementById("currentLevel").value);
+    const progress = parseInt(document.getElementById("currentProgress").value);
+    const target = parseInt(document.getElementById("targetLevel").value);
+
+    if (isNaN(level) || isNaN(progress) || isNaN(target)) {
+      return alert("Please enter valid numbers for current level, progress, and target level.");
+    }
+
+    baseAP = level * 5000 + progress;
+    targetLevel = target;
+
+    localStorage.setItem('baseAP', baseAP);
+    localStorage.setItem('targetLevel', targetLevel);
+
+    updateProgress();
+    updateHistory();
+    updateGamesRemaining();
+    updateAverageGamesRemaining();
+  }
+  function updateAverageGamesRemaining() {
+    const avgDiv = document.getElementById("avgGamesRemaining");
+    avgDiv.innerHTML = `<h3>Games Remaining (Average AP Gain)</h3>`;
+
+    if (history.length < 1) {
+      avgDiv.innerHTML += "Add at least one snapshot.";
+      return;
+    }
+
+    const gains = history.map(h => h.gain).filter(g => g > 0);
+    if (gains.length === 0) {
+      avgDiv.innerHTML += "No valid gains recorded yet.";
+      return;
+    }
+
+    const totalGain = gains.reduce((sum, g) => sum + g, 0);
+    const avgGain = totalGain / gains.length;
+    const remaining = getTargetAP() - getTotalAP();
+    const estimatedGames = Math.ceil(remaining / avgGain);
+
+    avgDiv.innerHTML += `<div>Total AP Remaining: ${remaining}</div>`;
+    avgDiv.innerHTML += `<div>Average AP/Game: ${avgGain.toFixed(2)}</div>`;
+    avgDiv.innerHTML += `<div><strong>Estimated Games:</strong> ${estimatedGames}</div>`
+    avgDiv.innerHTML += `<div style="margin-top: 10px; font-style: italic; font-size: 0.9em; color: #ccc;">
+    Based on your average AP gain per game, this estimate assumes a mix of game modes and bonuses.<br>
+    For example, if you mostly play Unrated with occasional bonus games like Spike Rush, you might need about this many games total.
+  </div>`;
+  }
+
+
+  // Initial render
+  updateProgress();
+  updateHistory();
+  updateGamesRemaining();
+  updateAverageGamesRemaining();
+</script>
+</body>
+</html>
